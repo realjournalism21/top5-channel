@@ -2,13 +2,14 @@
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 
 # Free-tier models first; the script tries the next one if a model is unavailable.
 MODELS = os.environ.get(
     "GEMINI_MODELS",
-    "gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite",
+    "gemini-3.6-flash,gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite",
 ).split(",")
 
 PROMPT = """You write the content for "Top 5", a short-video Instagram channel (@top5rankingsforyou).
@@ -53,7 +54,7 @@ def _call(model, prompt, key):
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.8}}
     req = urllib.request.Request(url, json.dumps(body).encode(),
                                  {"Content-Type": "application/json", "x-goog-api-key": key})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=75) as r:
         data = json.load(r)
     parts = data["candidates"][0]["content"]["parts"]
     return _clean("".join(p.get("text", "") for p in parts if not p.get("thought")))
@@ -88,16 +89,17 @@ def generate(topic, recent_titles):
         for attempt in range(2):
             try:
                 p = prompt if attempt == 0 else prompt + f"\nFix this problem from your last answer: {last}"
+                started = time.time()
                 content = validate(_call(model.strip(), p, key))
                 content["subject"] = topic["name"]
-                print(f"Generated with {model}: {content['title']}")
+                print(f"Generated with {model} in {time.time() - started:.0f}s: {content['title']}")
                 return content
-            except (urllib.error.HTTPError, urllib.error.URLError, KeyError, ValueError, json.JSONDecodeError) as e:
+            except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
                 detail = e.read().decode()[:300] if isinstance(e, urllib.error.HTTPError) else ""
                 last = f"{type(e).__name__}: {e} {detail}"
                 print(f"[{model}] attempt {attempt + 1} failed: {last}")
-                if isinstance(e, urllib.error.HTTPError) and e.code in (400, 403, 404):
-                    break  # model not available / bad key -> next model
+                if isinstance(e, (urllib.error.HTTPError, TimeoutError, urllib.error.URLError)):
+                    break  # model unavailable / slow / bad key -> try the next model
     raise RuntimeError(f"All Gemini attempts failed. Last error: {last}")
 
 
