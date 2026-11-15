@@ -1,0 +1,30 @@
+{
+  "subject": "Countries and population",
+  "title": "Most Populated Countries",
+  "subtitle": "UN estimates, 2024",
+  "metric_label": "Population (millions)",
+  "caption": "The five most populated countries on Earth. Two of them are home to more than a billion people each.",
+  "hashtags": ["#top5", "#population", "#geography", "#worldfacts", "#didyouknow"],
+  "items": [
+    {"rank": 5, "short": "Pakistan", "category": "South Asia", "name": "Pakistan", "value": 251,
+     "stat": "251M", "stat_caption": "people live in Pakistan",
+     "fact": "Pakistan is the fifth most populated country and has one of the youngest populations of any large nation.",
+     "source": "UN World Population Prospects 2024"},
+    {"rank": 4, "short": "Indonesia", "category": "Southeast Asia", "name": "Indonesia", "value": 283,
+     "stat": "283M", "stat_caption": "people spread over 17,000+ islands",
+     "fact": "Indonesia is the largest island country in the world and the most populated Muslim-majority nation.",
+     "source": "UN World Population Prospects 2024"},
+    {"rank": 3, "short": "United States", "category": "North America", "name": "United States", "value": 345,
+     "stat": "345M", "stat_caption": "people in the USA",
+     "fact": "The United States is the only country outside Asia in the top four.",
+     "source": "UN World Population Prospects 2024"},
+    {"rank": 2, "short": "China", "category": "East Asia", "name": "China", "value": 1419,
+     "stat": "1.42B", "stat_caption": "people in China",
+     "fact": "China's population has started to shrink after decades of growth.",
+     "source": "UN World Population Prospects 2024"},
+    {"rank": 1, "short": "India", "category": "South Asia", "name": "India", "value": 1451,
+     "stat": "1.45B", "stat_caption": "people in India",
+     "fact": "India overtook China as the most populated country in 2023.",
+     "source": "UN World Population Prospects 2024"}
+  ]
+}

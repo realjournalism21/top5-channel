@@ -1,0 +1,14 @@
+[
+  {"name": "Countries and population", "hint": "population, area, borders, capitals, languages"},
+  {"name": "Animals", "hint": "fastest, heaviest, longest-living, strangest, rarest animals"},
+  {"name": "Food and drink", "hint": "most expensive, most consumed, strangest foods and dishes, with measurable numbers"},
+  {"name": "Money and economics", "hint": "largest economies, richest historical figures, biggest companies in a past documented year, currencies"},
+  {"name": "Space and science", "hint": "planets, moons, distances, records in physics and nature"},
+  {"name": "Tallest, biggest, longest", "hint": "buildings, bridges, rivers, mountains, lakes with documented sizes"},
+  {"name": "Technology history", "hint": "inventions, early computers, internet and phone milestones, with documented numbers"},
+  {"name": "Sports records", "hint": "all-time records in athletics, football, cricket, basketball, Olympics"},
+  {"name": "Travel and places", "hint": "most visited cities, busiest airports, oldest cities, with documented numbers"},
+  {"name": "History", "hint": "largest empires, longest reigns, deadliest or oldest documented events, with documented numbers"},
+  {"name": "The human body", "hint": "largest organs, fastest reflexes, record-holding facts with measurable numbers"},
+  {"name": "Cars and engineering", "hint": "fastest production cars, biggest ships, longest tunnels, most powerful engines"}
+]
