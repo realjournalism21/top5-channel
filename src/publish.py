@@ -1,4 +1,4 @@
-"""Publishes a Reel through the Instagram API with Instagram Login (graph.instagram.com)."""
+"""Publishes a Reel through the Instagram API (works with Instagram-login and Facebook-login tokens)."""
 import json
 import os
 import time
@@ -6,7 +6,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-HOST = "https://graph.instagram.com/v23.0"
+HOSTS = ["https://graph.instagram.com/v23.0", "https://graph.facebook.com/v23.0"]
+HOST = HOSTS[0]
+
+
+def pick_host():
+    """Meta issues two kinds of tokens (Instagram-login and Facebook-login). Use whichever host accepts ours."""
+    global HOST
+    user, token = os.environ["IG_USER_ID"], os.environ["IG_ACCESS_TOKEN"]
+    custom = os.environ.get("IG_API_HOST")
+    errors = []
+    for host in ([custom] if custom else HOSTS):
+        try:
+            info = _request("GET", f"{host}/{user}", {"fields": "username", "access_token": token})
+            HOST = host
+            print(f"Token accepted by {host} for account {info.get('username')}")
+            return
+        except RuntimeError as e:
+            errors.append(f"{host}: {e}")
+    raise RuntimeError("Token not accepted by any Meta host:\n" + "\n".join(errors))
 
 
 def _request(method, url, params):
@@ -30,6 +48,7 @@ def check_video_url(url):
 
 def publish_reel(video_url, caption):
     user, token = os.environ["IG_USER_ID"], os.environ["IG_ACCESS_TOKEN"]
+    pick_host()
     check_video_url(video_url)
     container = _request("POST", f"{HOST}/{user}/media", {
         "media_type": "REELS", "video_url": video_url, "caption": caption,
