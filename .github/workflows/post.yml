@@ -1,0 +1,89 @@
+name: Post Top 5
+
+on:
+  schedule:
+    - cron: "0 4,10,16,22 * * *"
+  workflow_dispatch:
+    inputs:
+      post:
+        description: "Publish to Instagram? (true = post for real, false = test only)"
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: post-top5
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg and Pillow
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          pip install -r requirements.txt
+
+      - name: Decide whether to post
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ vars.POSTING_ENABLED }}" = "true" ]; then
+            echo "post=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.post }}" = "true" ]; then
+            echo "post=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "post=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write list and render video
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          POSTING: ${{ steps.decide.outputs.post }}
+        run: python src/main.py
+
+      - name: Keep video for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: top5-video
+          path: |
+            out/video.mp4
+            out/content.json
+          retention-days: 5
+
+      - name: Upload video to a public branch for Instagram
+        if: steps.decide.outputs.post == 'true'
+        run: |
+          mkdir /tmp/media
+          cp out/video.mp4 "/tmp/media/v${{ github.run_id }}.mp4"
+          cd /tmp/media
+          git init -q -b media
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add .
+          git commit -qm "media"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" media
+          echo "VIDEO_URL=https://raw.githubusercontent.com/${{ github.repository }}/media/v${{ github.run_id }}.mp4" >> "$GITHUB_ENV"
+
+      - name: Post to Instagram
+        if: steps.decide.outputs.post == 'true'
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: python src/post.py
+
+      - name: Save history
+        if: steps.decide.outputs.post == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add history.json
+          git diff --cached --quiet || (git commit -m "Update history" && git push)
