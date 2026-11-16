@@ -36,13 +36,13 @@ jobs:
       - name: Decide whether to post
         id: decide
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ vars.POSTING_ENABLED }}" = "true" ]; then
-            echo "post=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.post }}" = "true" ]; then
+          INPUT=$(echo "${{ github.event.inputs.post }}" | tr -d ' ' | tr 'A-Z' 'a-z')
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "$INPUT" = "true" ]; then
             echo "post=true" >> "$GITHUB_OUTPUT"
           else
             echo "post=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "event=${{ github.event_name }} input='${{ github.event.inputs.post }}'"
 
       - name: Write list and render video
         env:
