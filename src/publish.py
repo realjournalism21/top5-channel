@@ -1,4 +1,4 @@
-"""Publishes a Reel through the Instagram API (works with Instagram-login and Facebook-login tokens)."""
+"""Publishes a Reel through the Instagram API with Instagram Login (graph.instagram.com)."""
 import json
 import os
 import time
@@ -52,7 +52,7 @@ def publish_reel(video_url, caption):
     check_video_url(video_url)
     container = _request("POST", f"{HOST}/{user}/media", {
         "media_type": "REELS", "video_url": video_url, "caption": caption,
-        "share_to_feed": "true", "access_token": token})["id"]
+        "share_to_feed": "true", "thumb_offset": "500", "access_token": token})["id"]
     print("Container created:", container)
     for _ in range(40):  # up to ~10 minutes
         time.sleep(15)

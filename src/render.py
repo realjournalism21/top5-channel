@@ -1,9 +1,11 @@
-"""Renders a vertical 1080x1920 Top 5 countdown video in the @top5rankingsforyou style."""
-import math
+"""Renders a vertical 1080x1920 Top 5 countdown video in the @top5rankingsforyou style.
+
+Each countdown slide has an optional photo card. Slides without a photo use the plain layout.
+"""
 import subprocess
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 W, H, FPS = 1080, 1920, 30
 BG_TOP, BG_BOT = (8, 12, 32), (26, 14, 52)
@@ -14,8 +16,22 @@ ACCENTS = {5: (255, 169, 77), 4: (116, 167, 255), 3: (94, 224, 181),
            2: (199, 155, 255), 1: (74, 222, 128)}
 HANDLE = "@top5rankingsforyou"
 FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+MUSIC = Path(__file__).resolve().parent.parent / "assets" / "music" / "track.mp3"
+MUSIC_VOLUME = 0.7
 
 INTRO_S, ITEM_S, OUTRO_S, FADE_S = 2.4, 3.0, 3.4, 0.4
+
+# Layout numbers (pixels) for a slide without a photo and for a slide with one.
+GEOM_PLAIN = dict(dots_y=130, circ=(70, 200, 190, 320), num_font=84, tag_font=34,
+                  title_y=420, title_sizes=range(88, 47, -4), image=None,
+                  panel=(70, 640, 1010, 1190), hdr_y=690, bars_top=745, row_h=88, bar_dy=18, bar_h=40,
+                  lab_dy=38, lab_font=30, stat_y=1330, stat_font=130, cap_y=1385, cap_font=34,
+                  fact_y=1450, fact_font=34, fact_lh=46, src_y=1640)
+GEOM_IMG = dict(dots_y=100, circ=(70, 160, 170, 260), num_font=72, tag_font=32,
+                title_y=370, title_sizes=range(80, 43, -4), image=(70, 500, 1010, 850),
+                panel=(70, 875, 1010, 1225), hdr_y=912, bars_top=945, row_h=54, bar_dy=10, bar_h=32,
+                lab_dy=26, lab_font=26, stat_y=1350, stat_font=112, cap_y=1400, cap_font=32,
+                fact_y=1462, fact_font=32, fact_lh=42, src_y=1610)
 
 _font_cache = {}
 
@@ -75,11 +91,11 @@ def dots(draw, filled, total, color, x, y):
 
 def draw_logo(draw, cx, cy, r):
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(18, 22, 60), outline=(40, 48, 110), width=4)
-    draw.text((cx, cy - r * 0.42), "TOP", font=font("Bold", int(r * 0.6)), fill=WHITE, anchor="mm")
-    draw.text((cx, cy + r * 0.10), "5", font=font("Bold", int(r * 1.05)), fill=GOLD, anchor="mm")
+    draw.text((cx, cy - r * 0.60), "TOP", font=font("Bold", int(r * 0.42)), fill=WHITE, anchor="mm")
+    draw.text((cx, cy + r * 0.22), "5", font=font("Bold", int(r * 0.82)), fill=GOLD, anchor="mm")
     for i in range(5):
         x = cx + (i - 2) * r * 0.16
-        draw.ellipse([x - 5, cy + r * 0.78 - 5, x + 5, cy + r * 0.78 + 5], fill=GOLD)
+        draw.ellipse([x - 5, cy + r * 0.80 - 5, x + 5, cy + r * 0.80 + 5], fill=GOLD)
 
 
 def build_intro(content):
@@ -96,33 +112,67 @@ def build_intro(content):
     return layer
 
 
+def photo_card(path, w, h):
+    """Photo shown whole (never cropped) on a blurred, darkened copy of itself, with rounded corners."""
+    src = Image.open(path).convert("RGB")
+    scale = max(w / src.width, h / src.height)
+    big = src.resize((int(src.width * scale) + 1, int(src.height * scale) + 1))
+    left, top = (big.width - w) // 2, (big.height - h) // 2
+    card = big.crop((left, top, left + w, top + h)).filter(ImageFilter.GaussianBlur(28))
+    card = ImageEnhance.Brightness(card).enhance(0.45)
+    fit_scale = min((w - 40) / src.width, (h - 30) / src.height)
+    fg = src.resize((max(1, int(src.width * fit_scale)), max(1, int(src.height * fit_scale))))
+    fg_mask = Image.new("L", fg.size, 0)
+    ImageDraw.Draw(fg_mask).rounded_rectangle([0, 0, fg.width, fg.height], radius=18, fill=255)
+    card.paste(fg, ((w - fg.width) // 2, (h - fg.height) // 2 - 6), fg_mask)
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, w, h], radius=32, fill=255)
+    return card, mask
+
+
+def has_photo(item):
+    f = item.get("image_file")
+    return bool(f) and Path(f).exists()
+
+
 def build_item(content, item, index):
+    g = GEOM_IMG if has_photo(item) else GEOM_PLAIN
     rank, accent = item["rank"], ACCENTS[item["rank"]]
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    dots(d, index + 1, 5, accent, 70, 130)
-    # rank circle + category
-    d.ellipse([70, 200, 190, 320], fill=accent)
-    d.text((130, 262), str(rank), font=font("Bold", 84), fill=(10, 14, 36), anchor="mm")
-    d.text((215, 262), item["category"].upper(), font=font("Bold", 34), fill=accent, anchor="lm")
+    dots(d, index + 1, 5, accent, 70, g["dots_y"])
+    x0, y0, x1, y1 = g["circ"]
+    d.ellipse([x0, y0, x1, y1], fill=accent)
+    cy = (y0 + y1) // 2
+    d.text(((x0 + x1) // 2, cy), str(rank), font=font("Bold", g["num_font"]), fill=(10, 14, 36), anchor="mm")
+    d.text((x1 + 25, cy), item["category"].upper(), font=font("Bold", g["tag_font"]), fill=accent, anchor="lm")
     # title
-    fnt, lines = fit(d, item["name"].upper(), "Bold", 940, 2, range(88, 47, -4))
-    y = 420
+    fnt, lines = fit(d, item["name"].upper(), "Bold", 940, 2, g["title_sizes"])
+    y = g["title_y"]
     for line in lines:
         d.text((70, y), line, font=fnt, fill=WHITE, anchor="ls")
         y += int(fnt.size * 1.18)
+    # photo card
+    if g["image"]:
+        ix0, iy0, ix1, iy1 = g["image"]
+        card, mask = photo_card(item["image_file"], ix1 - ix0, iy1 - iy0)
+        layer.paste(card, (ix0, iy0), mask)
+        credit = item.get("image_credit", "")
+        if credit:
+            d.text((ix0 + 22, iy1 - 14), credit, font=font("Regular", 20), fill=(235, 238, 250),
+                   anchor="ls", stroke_width=2, stroke_fill=(0, 0, 0))
     # chart panel
-    d.rounded_rectangle([70, 640, 1010, 1190], radius=32, fill=PANEL, outline=PANEL_EDGE, width=3)
-    d.text((110, 690), content["metric_label"].upper(), font=font("Bold", 26), fill=MUTED, anchor="lm")
-    # stat
-    d.text((70, 1330), item["stat"], font=font("Bold", 130), fill=accent, anchor="ls")
-    d.text((70, 1385), item["stat_caption"], font=font("Medium", 34), fill=WHITE, anchor="ls")
-    fact_fnt = font("Regular", 34)
-    y = 1450
+    d.rounded_rectangle(list(g["panel"]), radius=32, fill=PANEL, outline=PANEL_EDGE, width=3)
+    d.text((110, g["hdr_y"]), content["metric_label"].upper(), font=font("Bold", 26), fill=MUTED, anchor="lm")
+    # stat, caption, fact, source
+    d.text((70, g["stat_y"]), item["stat"], font=font("Bold", g["stat_font"]), fill=accent, anchor="ls")
+    d.text((70, g["cap_y"]), item["stat_caption"], font=font("Medium", g["cap_font"]), fill=WHITE, anchor="ls")
+    fact_fnt = font("Regular", g["fact_font"])
+    y = g["fact_y"]
     for line in wrap(d, item["fact"], fact_fnt, 940)[:3]:
         d.text((70, y), line, font=fact_fnt, fill=(205, 212, 235), anchor="ls")
-        y += 46
-    d.text((70, 1640), "Source: " + item["source"], font=font("Regular", 24), fill=MUTED, anchor="ls")
+        y += g["fact_lh"]
+    d.text((70, g["src_y"]), "Source: " + item["source"], font=font("Regular", 24), fill=MUTED, anchor="ls")
     return layer
 
 
@@ -139,31 +189,36 @@ def build_outro():
     return layer
 
 
-def draw_bars(frame, content, current_rank, local_t, fade):
+def draw_bars(frame, content, item, local_t, fade):
     """Countdown bar chart: revealed ranks stay, current one grows, upcoming ones are hidden."""
+    g = GEOM_IMG if has_photo(item) else GEOM_PLAIN
+    current_rank = item["rank"]
     d = ImageDraw.Draw(frame)
     items = {it["rank"]: it for it in content["items"]}
     vmax = max(it["value"] for it in content["items"])
     grow = ease((local_t - 0.35) / 1.0)
-    top, row_h, x0, bar_max = 745, 88, 110, 430
+    x0, bar_max = 110, 430
+    top, row_h, bdy, bh, ldy = g["bars_top"], g["row_h"], g["bar_dy"], g["bar_h"], g["lab_dy"]
+    radius = bh // 2
     for n, rank in enumerate([5, 4, 3, 2, 1]):
         it, y = items[rank], top + n * row_h
         accent = ACCENTS[rank]
-        d.rounded_rectangle([x0 + 330, y + 18, x0 + 330 + bar_max, y + 58], radius=20,
+        d.rounded_rectangle([x0 + 330, y + bdy, x0 + 330 + bar_max, y + bdy + bh], radius=radius,
                             fill=blend(PANEL, DIM, fade * 0.6))
         if rank < current_rank:   # not revealed yet
-            d.text((x0, y + 38), f"#{rank}  ?", font=font("Bold", 30), fill=blend(PANEL, DIM, fade), anchor="lm")
+            d.text((x0, y + ldy), f"#{rank}  ?", font=font("Bold", g["lab_font"]),
+                   fill=blend(PANEL, DIM, fade), anchor="lm")
             continue
         frac = max(0.05, it["value"] / vmax) * (grow if rank == current_rank else 1.0)
         color = accent if rank == current_rank else blend(PANEL, accent, 0.45)
         text_c = WHITE if rank == current_rank else MUTED
-        d.rounded_rectangle([x0 + 330, y + 18, x0 + 330 + max(24, bar_max * frac), y + 58],
-                            radius=20, fill=blend(PANEL, color, fade))
+        d.rounded_rectangle([x0 + 330, y + bdy, x0 + 330 + max(bh, bar_max * frac), y + bdy + bh],
+                            radius=radius, fill=blend(PANEL, color, fade))
         label = f"#{rank}  {it['short']}"
-        fnt = font("Bold", 30)
-        while d.textlength(label, font=fnt) > 310 and fnt.size > 20:
+        fnt = font("Bold", g["lab_font"])
+        while d.textlength(label, font=fnt) > 310 and fnt.size > 18:
             fnt = font("Bold", fnt.size - 2)
-        d.text((x0, y + 38), label, font=fnt, fill=blend(PANEL, text_c, fade), anchor="lm")
+        d.text((x0, y + ldy), label, font=fnt, fill=blend(PANEL, text_c, fade), anchor="lm")
 
 
 def render(content, out_path):
@@ -177,11 +232,16 @@ def render(content, out_path):
     segments += [("outro", OUTRO_S, outro, None)]
     total = sum(s[1] for s in segments)
 
-    cmd = ["ffmpeg", "-y", "-loglevel", "error",
-           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-           "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-shortest",
+    video_in = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-"]
+    if MUSIC.exists():   # background music, faded out at the end; silent track if the file is missing
+        audio_in = ["-stream_loop", "-1", "-i", str(MUSIC)]
+        audio_fx = ["-af", f"volume={MUSIC_VOLUME},afade=t=out:st={total - 1.2:.2f}:d=1.2"]
+    else:
+        audio_in = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+        audio_fx = []
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", *video_in, *audio_in, "-t", f"{total:.2f}",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-           "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(out_path)]
+           *audio_fx, "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(out_path)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     for f in range(int(total * FPS)):
         t = f / FPS
@@ -191,7 +251,7 @@ def render(content, out_path):
                 local = t - acc
                 break
             acc += dur
-        e = ease(local / FADE_S)
+        e = 1.0 if kind == "intro" else ease(local / FADE_S)
         frame = bg.copy()
         shifted = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         shifted.paste(layer, (0, int(40 * (1 - e))))
@@ -199,7 +259,7 @@ def render(content, out_path):
         shifted.putalpha(alpha)
         frame.paste(shifted, (0, 0), shifted)
         if kind == "item":
-            draw_bars(frame, content, item["rank"], local, e)
+            draw_bars(frame, content, item, local, e)
         proc.stdin.write(frame.tobytes())
     proc.stdin.close()
     if proc.wait() != 0:
