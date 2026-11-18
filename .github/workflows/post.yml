@@ -2,7 +2,9 @@ name: Post Top 5
 
 on:
   schedule:
-    - cron: "0 4,10,16,22 * * *"
+    # 2 times a day (UTC): 07:00 and 17:00 UTC = 08:00 and 18:00 in Frankfurt in winter
+    # (09:00 and 19:00 in summer). GitHub can start up to an hour late.
+    - cron: "0 7,17 * * *"
   workflow_dispatch:
     inputs:
       post:
@@ -50,7 +52,7 @@ jobs:
           POSTING: ${{ steps.decide.outputs.post }}
         run: python src/main.py
 
-      - name: Keep video for review
+      - name: Keep video for review (download from the run page)
         uses: actions/upload-artifact@v4
         with:
           name: top5-video
@@ -80,7 +82,7 @@ jobs:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
         run: python src/post.py
 
-      - name: Save history
+      - name: Save history (so lists are not repeated)
         if: steps.decide.outputs.post == 'true'
         run: |
           git config user.name "github-actions"
