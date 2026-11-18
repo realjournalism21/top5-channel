@@ -36,7 +36,7 @@ Return ONLY JSON in exactly this shape:
   "items": [
     {{"rank": 5, "short": "max 16 chars", "category": "max 18 chars, e.g. Asia", "name": "full headline, max 40 chars",
       "value": 251.0, "stat": "big number text, max 12 chars, e.g. 251M", "stat_caption": "max 46 chars, what the stat means",
-      "fact": "one interesting sentence, max 130 chars", "source": "organisation + year, max 60 chars",
+      "fact": "one interesting sentence, max 140 chars", "source": "organisation + year, max 60 chars",
       "image_kind": "map" if the item is a country, state, region or city (a location map is shown); "photo" for a physical thing (animal, landmark, building, vehicle, food, product, object); null for a person or something abstract",
       "image_query": "for kind map: ONLY the exact place name in English, e.g. India or Indonesia; for kind photo: 3-6 words naming exactly this item as it would be titled on Wikimedia Commons, e.g. Stroh 80 rum bottle; null if image_kind is null"}},
     ... one object each for ranks 4, 3, 2, 1 (in that order)
@@ -45,7 +45,16 @@ Return ONLY JSON in exactly this shape:
 "value" must be a positive number in the same unit for all five items."""
 
 GENERIC_SOURCE = re.compile(r"manufacturer|company (data|website|specification)|various|general knowledge|internet|online|wikipedia|unknown|n/a", re.I)
-LIMITS = {"short": 16, "category": 18, "name": 40, "stat": 12, "stat_caption": 46, "fact": 130, "source": 60}
+LIMITS = {"short": 16, "category": 18, "name": 40, "stat": 12, "stat_caption": 46, "fact": 150, "source": 60}
+TRIMMABLE = ("short", "category", "name", "stat_caption", "source")   # slightly long -> shortened, not rejected
+
+
+def _trim(text, lim):
+    """Shortens text to lim characters at a word boundary (hard cut if it is a single long word)."""
+    if len(text) <= lim:
+        return text
+    cut = text[:lim + 1].rsplit(" ", 1)[0] if " " in text[:lim + 1] else text[:lim]
+    return cut.rstrip(" ,;:-&").strip() or text[:lim]
 
 
 def _clean(text):
@@ -79,6 +88,8 @@ def validate(c):
         for k, lim in LIMITS.items():
             if not isinstance(it.get(k), str) or not it[k].strip():
                 raise ValueError(f"item {it.get('rank')} missing {k}")
+            if len(it[k]) > lim and k in TRIMMABLE and len(it[k]) <= lim * 1.5:
+                it[k] = _trim(it[k].strip(), lim)
             if len(it[k]) > lim:
                 raise ValueError(f"item {it['rank']} {k} too long ({len(it[k])}>{lim})")
         if GENERIC_SOURCE.search(it["source"]):
@@ -123,21 +134,25 @@ def generate(topic, recent_titles):
     prompt = PROMPT.format(subject=topic["name"], hint=topic["hint"],
                            recent="; ".join(recent_titles[-40:]) or "none")
     last = None
-    for model in MODELS:
-        for attempt in range(2):
-            try:
-                p = prompt if attempt == 0 else prompt + f"\nFix this problem from your last answer: {last}"
-                started = time.time()
-                content = validate(_call(model.strip(), p, key))
-                content["subject"] = topic["name"]
-                print(f"Generated with {model} in {time.time() - started:.0f}s: {content['title']}")
-                return review(content, key)
-            except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
-                detail = e.read().decode()[:300] if isinstance(e, urllib.error.HTTPError) else ""
-                last = f"{type(e).__name__}: {e} {detail}"
-                print(f"[{model}] attempt {attempt + 1} failed: {last}")
-                if isinstance(e, (urllib.error.HTTPError, TimeoutError, urllib.error.URLError)):
-                    break  # model unavailable / slow / bad key -> try the next model
+    for round_no in range(2):            # second round after a pause, in case Gemini was just busy
+        if round_no:
+            print("All models failed - waiting 60s and trying again")
+            time.sleep(60)
+        for model in MODELS:
+            for attempt in range(3):
+                try:
+                    p = prompt if attempt == 0 else prompt + f"\nFix this problem from your last answer: {last}"
+                    started = time.time()
+                    content = validate(_call(model.strip(), p, key))
+                    content["subject"] = topic["name"]
+                    print(f"Generated with {model} in {time.time() - started:.0f}s: {content['title']}")
+                    return review(content, key)
+                except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
+                    detail = e.read().decode()[:300] if isinstance(e, urllib.error.HTTPError) else ""
+                    last = f"{type(e).__name__}: {e} {detail}"
+                    print(f"[{model}] attempt {attempt + 1} failed: {last}")
+                    if isinstance(e, (urllib.error.HTTPError, TimeoutError, urllib.error.URLError)):
+                        break  # model unavailable / slow / bad key -> try the next model
     raise RuntimeError(f"All Gemini attempts failed. Last error: {last}")
 
 
