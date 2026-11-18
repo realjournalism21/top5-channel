@@ -20,6 +20,9 @@ Rules:
 - Every number must be one you are highly confident about. If unsure, pick a different item. Round numbers sensibly.
 - All five items must be measured by the SAME numeric metric so they can be ranked and shown as bars.
 - Rank 5 is the least extreme, rank 1 the most extreme/surprising. Interesting and surprising beats obvious.
+- Every sentence in "fact" must be something you are CERTAIN is true. Avoid claims like "banned", "illegal", "only", "first", "record", "warnings" unless you are certain. Prefer plain measurable facts.
+- "source" must be a specific real publication or dataset you are sure exists (for example "UN World Population Prospects 2024", "IUCN Red List", "FIFA records"). Never write generic sources such as "Manufacturer Specifications" or "Company data". Do not cite Guinness World Records unless that exact record exists.
+- Prefer items that can be shown with a picture: countries and cities (shown as a map), animals, landmarks, buildings, vehicles, foods, products. Avoid ranking people.
 - Do not repeat these recent titles: {recent}
 - Plain English for an international audience. No emojis.
 
@@ -33,12 +36,15 @@ Return ONLY JSON in exactly this shape:
   "items": [
     {{"rank": 5, "short": "max 16 chars", "category": "max 18 chars, e.g. Asia", "name": "full headline, max 40 chars",
       "value": 251.0, "stat": "big number text, max 12 chars, e.g. 251M", "stat_caption": "max 46 chars, what the stat means",
-      "fact": "one interesting sentence, max 130 chars", "source": "organisation + year, max 60 chars"}},
+      "fact": "one interesting sentence, max 130 chars", "source": "organisation + year, max 60 chars",
+      "image_kind": "map" if the item is a country, state, region or city (a location map is shown); "photo" for a physical thing (animal, landmark, building, vehicle, food, product, object); null for a person or something abstract",
+      "image_query": "for kind map: ONLY the exact place name in English, e.g. India or Indonesia; for kind photo: 3-6 words naming exactly this item as it would be titled on Wikimedia Commons, e.g. Stroh 80 rum bottle; null if image_kind is null"}},
     ... one object each for ranks 4, 3, 2, 1 (in that order)
   ]
 }}
 "value" must be a positive number in the same unit for all five items."""
 
+GENERIC_SOURCE = re.compile(r"manufacturer|company (data|website|specification)|various|general knowledge|internet|online|wikipedia|unknown|n/a", re.I)
 LIMITS = {"short": 16, "category": 18, "name": 40, "stat": 12, "stat_caption": 46, "fact": 130, "source": 60}
 
 
@@ -75,9 +81,41 @@ def validate(c):
                 raise ValueError(f"item {it.get('rank')} missing {k}")
             if len(it[k]) > lim:
                 raise ValueError(f"item {it['rank']} {k} too long ({len(it[k])}>{lim})")
+        if GENERIC_SOURCE.search(it["source"]):
+            raise ValueError(f"item {it['rank']} source is too generic: {it['source']}")
+        q = it.get("image_query")
+        if it.get("image_kind") not in (None, "map", "photo"):
+            raise ValueError(f"item {it['rank']} image_kind must be map, photo or null")
+        if q is not None and (not isinstance(q, str) or len(q) > 70):
+            raise ValueError(f"item {it['rank']} image_query must be text under 70 chars or null")
         if not isinstance(it.get("value"), (int, float)) or it["value"] <= 0:
             raise ValueError(f"item {it['rank']} value must be a positive number")
     return c
+
+
+REVIEW_PROMPT = """You are a strict fact-checker. Below is the JSON for a short Top 5 video. Check EVERY number, ranking and sentence.
+Rules:
+- Keep an item only if you are certain its number is right and that it belongs in this ranking. If not, replace it with a better-known item that fits the same metric.
+- If a "fact" sentence contains anything you are not certain of (words like banned, only, first, record, illegal, warnings), rewrite it as a plain statement you are certain of.
+- If a "source" is not a real, specific publication or dataset you are sure exists, replace it with one you are sure exists.
+- Keep the exact same JSON shape and keys (including image_kind and image_query), ranks 5,4,3,2,1 in that order, and the same length limits. Return ONLY the corrected JSON.
+JSON:
+__PAYLOAD__"""
+
+
+def review(content, key):
+    keep = ("title", "subtitle", "metric_label", "caption", "hashtags", "items")
+    prompt = REVIEW_PROMPT.replace("__PAYLOAD__", json.dumps({k: content[k] for k in keep}, ensure_ascii=False))
+    for model in MODELS:
+        try:
+            fixed = validate(_call(model.strip(), prompt, key))
+            fixed["subject"] = content.get("subject", "")
+            print(f"Fact-check pass done with {model}")
+            return fixed
+        except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
+            print(f"[{model}] fact-check failed: {type(e).__name__}: {e}")
+    print("Fact-check pass skipped (kept the original list)")
+    return content
 
 
 def generate(topic, recent_titles):
@@ -93,7 +131,7 @@ def generate(topic, recent_titles):
                 content = validate(_call(model.strip(), p, key))
                 content["subject"] = topic["name"]
                 print(f"Generated with {model} in {time.time() - started:.0f}s: {content['title']}")
-                return content
+                return review(content, key)
             except (OSError, KeyError, ValueError, json.JSONDecodeError) as e:
                 detail = e.read().decode()[:300] if isinstance(e, urllib.error.HTTPError) else ""
                 last = f"{type(e).__name__}: {e} {detail}"

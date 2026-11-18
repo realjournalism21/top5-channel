@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import content as content_mod  # noqa: E402
+import images  # noqa: E402
 import render  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +28,7 @@ def main():
         idx = len(history["posts"]) if posting else int(os.environ.get("GITHUB_RUN_NUMBER", len(history["posts"])))
         topic = topics[idx % len(topics)]
         content = content_mod.generate(topic, [p["title"] for p in history["posts"]])
+        content = images.attach(content, OUT)
 
     seconds = render.render(content, OUT / "video.mp4")
     caption = content_mod.build_caption(content)
